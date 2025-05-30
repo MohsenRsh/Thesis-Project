@@ -1,0 +1,203 @@
+---
+title: "Bulk Data preprocessing"
+author: "Mohsen Rastgoo Shahrestani"
+date: "2025-05-22"
+output: html_document
+---
+
+```{r}
+# loading data d40
+d40 <- read.csv("D:/Thesis/Analysis/Bulk/expression_data_d40.csv", row.names = 1)
+```
+
+```{r}
+rownames(d40) <- sub("\\.\\d+$", "", rownames(d40))
+```
+
+# Pre-processing
+```{r}
+library(tidyverse)
+library(EDASeq)
+library(edgeR)
+```
+
+```{r}
+#only for plotting and visualization
+dlog <- log1p(d40)
+```
+
+
+```{r}
+boxplot(dlog, xlab = "sample", 
+        ylab="log1pexpression", ylim=c(0,20), las = 2, cex.axis = 0.6)
+
+```
+
+```{r}
+dim(d40)
+```
+
+filtering lowly expressed genes
+
+```{r}
+filter <- apply(d40, 1, function(x) sum(x >= 10))
+filter <- filter > 1
+filtered <- d40[filter,]
+
+boxplot(filtered, xlab = "sample",
+        ylab = "log1pexpression", ylim = c(0,20), las = 2, cex.axis = 0.6)
+```
+
+
+```{r}
+dim(filtered)
+```
+
+```{r}
+plotRLE(dlog, outline = FALSE, las = 2,
+        ylab = "RLE", main = "RLE of raw counts with dlog data", col = A)
+```
+
+
+## GC
+Based on GC content a read can be more or less representated, so it is necessary to take into account the possible bias due to that: 
+```{r}
+ensid40 <- as.character(rownames(filtered))
+
+ensid40 <- substr(ensid40, 1, 15 )
+
+gc40 <- getGeneLengthAndGCContent(ensid40, "hg19",mode="org.db")
+
+head(gc40)
+```
+
+
+```{r}
+dim(gc40)
+```
+
+
+```{r}
+#Assumes the second column of gc40 (likely GC content) may have NAs. You're keeping only rows with valid GC values.
+flag <- !is.na(gc40[,2])
+head(flag)
+sum(flag)
+
+d40.sel <- filtered[flag,]
+head(d40.sel)
+dim(d40.sel)
+
+gc40 <- gc40[flag,]
+head(gc40)
+
+
+
+data <- d40.sel
+head(data)
+
+
+row.names(data) <- row.names(gc40)
+
+```
+
+
+
+
+We are going to eliminate duplicates: 
+```{r}
+dup <- duplicated(row.names(data))
+table(duplicated(row.names(data)))
+```
+
+```{r}
+gc40 <- gc40[!dup,]
+data <- data[!dup,]
+d40.sel <- d40.sel[!dup,]
+```
+
+
+```{r}
+data <- as.matrix(data)
+storage.mode(data) <- "integer"
+```
+
+
+```{r}
+#here we are constructing expression set object
+df <- newSeqExpressionSet(
+  data,
+  phenoData = AnnotatedDataFrame(data.frame(
+    conditions = factor(1:ncol(data)),
+    row.names = colnames(data)
+  )),
+  featureData = AnnotatedDataFrame(data.frame(
+    gc = gc40[, 2],
+    l = gc40[, 1]
+  ))
+)
+s <- EDASeq::biasPlot(df,"gc"
+                      ,ylim=c(0,10),
+                      log=TRUE)
+```
+
+For normalization we need to filter our data as mention before:
+```{r}
+#filter_norm <- apply(counts, 1, function(x) sum(x >= 10))
+#filter_norm <- filter_norm > 2
+```
+
+
+```{r}
+#df <- df[filter_norm,]
+#d40.sel <- d40.sel[filter_norm,]
+```
+
+
+```{r}
+df1 <- counts(df)
+```
+### TMM method
+```{r}
+lbs <- calcNormFactors(df1, method = "TMM")
+tmm <- edgeR::cpm(df1, lib.size = lbs * colSums(df1))
+```
+
+```{r}
+library(ggplot2)
+```
+
+
+```{r}
+boxplot(log2(tmm+1), outline = F, las = 2, ylab = "log(counts+1)", main = "Boxplot TMM",
+        xaxt = "n")
+```
+
+
+#Save normalized data
+
+```{r}
+# Assuming `tmm` is your normalized matrix (genes × samples)
+pheno_data <- data.frame(
+  condition = factor(1:ncol(tmm)),
+  row.names = colnames(tmm)
+)
+
+bulkd40_eset <- ExpressionSet(
+  assayData = as.matrix(tmm),
+  phenoData = AnnotatedDataFrame(pheno_data)
+)
+```
+
+```{r}
+# Save the ExpressionSet object
+
+#extract he count matrix
+bulknormald40 <- exprs(bulkd40_eset)
+
+#save as csv
+write.csv(bulknormald40, "D:/Thesis/Analysis/Bulk/bulknormald40.csv", row.names = TRUE)
+
+```
+
+
+

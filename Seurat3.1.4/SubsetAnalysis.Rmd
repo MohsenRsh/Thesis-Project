@@ -1,0 +1,161 @@
+---
+title: "SubsetAnalysis"
+author: "Mohsen Rastgoo Shahrestani"
+date: "2025-05-28"
+output: html_document
+---
+
+To rerun UMAP;
+```{r}
+subset_obj <- ScaleData(subset_obj, features = rownames(subset_obj))
+subset_obj <- RunPCA(subset_obj, features = VariableFeatures(object = subset_obj))
+subset_obj <- RunUMAP(subset_obj, dims = 1:10)
+DimPlot(subset_obj, group.by = "cell_type", label = TRUE)
+
+```
+
+```{r}
+# find markers for every cluster compared to all remaining cells, report only the positive
+# ones
+subset_obj.markers <- FindAllMarkers(subset_obj, only.pos = TRUE)
+```
+
+```{r}
+library(dplyr)
+
+top100_per_cluster <- subset_obj.markers %>%
+  group_by(cluster) %>%
+  top_n(n = 100, wt = avg_logFC) %>%
+  arrange(cluster, desc(avg_logFC))
+```
+
+```{r}
+write.csv(top100_per_cluster, file = "D:/Thesis/Analysis/Seurat3.1.4/top100_markers_per_cluster_subset.csv", row.names = FALSE)
+```
+
+
+Signature MAtrix construction
+```{r}
+avg_exp <- AverageExpression(subset_obj, return.seurat = F)
+```
+
+```{r}
+signature_matrix <- avg_exp$RNA
+```
+
+
+```{r}
+top50_markers <- subset_obj.markers %>%
+  group_by(cluster) %>%
+  top_n(n = 50, wt = avg_logFC) %>%
+  arrange(cluster, desc(avg_logFC))
+
+signature_matrix_top <- signature_matrix[rownames(signature_matrix) %in% top50_markers$gene, ]
+```
+
+Saving both signature matrix
+```{r}
+write.csv(signature_matrix, file = "D:/Thesis/Analysis/Seurat3.1.4/signature_matrix_full.csv")
+write.csv(signature_matrix_top, file = "D:/Thesis/Analysis/Seurat3.1.4/signature_matrix_top50.csv")
+```
+
+
+Running Cibersort
+```{r}
+devtools::install_github("Moonerss/CIBERSORT")
+```
+
+```{r}
+library(CIBERSORT)
+```
+
+```{r}
+library(biomaRt)
+
+```
+
+giving gene names instead of ensembel ids
+```{r}
+library(org.Hs.eg.db)
+library(AnnotationDbi)
+```
+
+Uploading signature matrix and bulk expression data 
+```{r}
+#csv file
+
+#bulkd80 <- read.csv("D:/Thesis/Analysis/Bulk/bulknormald80.csv")
+
+bulkd40 <- read.csv("D:/Thesis/Analysis/Bulk/bulknormald40.csv")
+
+```
+
+```{r}
+# Convert Ensembl IDs to gene symbols for bulk data
+
+
+# Convert Ensembl ID column to character if needed
+bulkd40$X <- as.character(bulkd40$X)
+
+# Remove version numbers (if any) — not needed in your screenshot, but safe
+bulkd40$ensembl_clean <- sub("\\..*$", "", bulkd40$X)
+
+bulkd40$gene_symbol <- mapIds(
+  org.Hs.eg.db,
+  keys = bulkd40$ensembl_clean,
+  column = "SYMBOL",
+  keytype = "ENSEMBL",
+  multiVals = "first"
+)
+
+# Remove rows with NA gene symbols
+bulkd40_clean <- bulkd40[!is.na(bulkd40$gene_symbol), ]
+
+# Remove duplicated gene symbols
+bulkd40_clean <- bulkd40_clean[!duplicated(bulkd40_clean$gene_symbol), ]
+
+# Set gene symbols as rownames
+rownames(bulkd40_clean) <- bulkd40_clean$gene_symbol
+
+# Drop unnecessary columns (if needed)
+bulkd40_clean <- bulkd40_clean[ , c("X40n1", "X40n2")]
+
+```
+
+```{r}
+# Assume rownames contain gene names
+bulkd40_clean_out <- bulkd40_clean
+bulkd40_clean_out$Genes <- rownames(bulkd40_clean_out)
+
+# Move 'Genes' to the first column
+bulkd40_clean_out <- bulkd40_clean_out[ , c("Genes", setdiff(colnames(bulkd40_clean_out), "Genes"))]
+
+# Write as tab-delimited file with quotes
+write.table(bulkd40_clean_out, file = "bulk_mixture_filed40.txt", sep = "\t", quote = TRUE, row.names = FALSE)
+```
+
+```{r}
+signature_matrix_out <- signature_matrix_top  # or your filtered version
+signature_matrix_out$Genes <- rownames(signature_matrix_out)
+signature_matrix_out <- signature_matrix_out[ , c("Genes", setdiff(colnames(signature_matrix_out), "Genes"))]
+
+write.table(signature_matrix_out, file = "signature_matrix.txt", sep = "\t", quote = TRUE, row.names = FALSE)
+
+```
+
+
+```{r}
+
+# Load data from disk
+signature_matrix <- read.table("signature_matrix.txt", sep = "\t", header = TRUE, row.names = 1, check.names = FALSE)
+mixture_file <- read.table("bulk_mixture_filed40.txt", sep = "\t", header = TRUE, row.names = 1, check.names = FALSE)
+
+
+
+# Run it
+results_top40thirdtry <- cibersort("signature_matrix.txt", "bulk_mixture_filed40.txt")
+
+
+
+```
+

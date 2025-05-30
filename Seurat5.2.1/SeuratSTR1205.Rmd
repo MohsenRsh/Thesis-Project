@@ -1,0 +1,296 @@
+---
+title: "Seurat15thMAy"
+output:
+  html_document:
+    df_print: paged
+---
+
+It would be the rewised version after talking to Professor Sales.
+
+I understood that the last version of Seurat doesn't work with Azimuth. Then I will downgrade my Seurat to a older version.
+
+```{r}
+#remotes::install_version("Seurat", version = "5.2.1")
+
+```
+
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(SeuratData)
+library(patchwork)
+```
+
+```{r}
+#setting the directory of the file
+dir <-"D:/Thesis/Analysis/scData/1205_d80/"
+
+#We load our data
+#str stands for striatal and 1205 is the cell line number.
+str1205 <- Read10X(data.dir = dir)
+```
+
+```{r}
+# Create Seurat object
+str1205 <- CreateSeuratObject(counts = str1205, min.cells = 3) 
+#We don't filter it at the first time and we check the Counts, fetures and mithocondrial genes first by density plot and then we decide to remove based on a treshhold.
+#After checking them, I understand the treshhold that the authers proposed is ok.
+```
+
+```{r}
+#It's a Seurat object which by [[]] we can see the metadata.
+str1205[[]]
+```
+
+For trimming the data we should check the number of genes per cell, the number of counts per cell and the percentage of mitochondrial genes.
+```{r}
+# Check the number of genes per cell
+feature <- str1205[["nFeature_RNA"]]
+#plotting the density plot
+ggplot(data = feature, aes(x = nFeature_RNA)) +
+  geom_density() +
+  labs(title = "Density plot of nFeature_RNA") 
+```
+
+
+```{r}
+# Check the number of counts per cell
+counts <- str1205[["nCount_RNA"]]
+#plotting the density plot
+ggplot(data = counts, aes(x = nCount_RNA)) +
+  geom_density() +
+  labs(title = "Density plot of nCount_RNA") 
+```
+
+
+
+```{r}
+# Check the percentage of mitochondrial genes
+mito_genes <- grep(pattern = "^MT-", x = rownames(str1205), value = TRUE)
+str1205[["percent.mito"]] <- PercentageFeatureSet(str1205, features = mito_genes)
+
+mito <- str1205[["percent.mito"]]
+
+#plotting the density plot
+ggplot(data = mito, aes(x = percent.mito)) +
+  geom_density() +
+  labs(title = "Density plot of percent.mito")
+
+```
+
+ Filter cells based on nFeature_RNA
+as the paper said "cells with fewer than 100 or more than 10,000 genes were filtered out"
+```{r}
+str1205 <- subset(str1205, subset = nFeature_RNA > 100 & nFeature_RNA < 10000)
+```
+
+
+Filter cells based on mithocondrial genes
+as the paper said "cells with more than 15% of mitochondrial genes were filtered out"
+```{r}
+str1205 <- subset(str1205, subset = percent.mito < 15) #A silly was made before. Instead of 15, I used 0.15.
+```
+
+
+Filter out X and Y chromosomes
+ Get the list of genes on the X and Y chromosomes
+```{r}
+x_genes <- grep("^X", rownames(str1205), value = TRUE)
+y_genes <- grep("^Y", rownames(str1205), value = TRUE)
+# Filter out the genes on the X and Y chromosomes
+str1205<- str1205[!rownames(str1205) %in% c(x_genes, y_genes), ]
+```
+
+
+
+```{r}
+str1205[[]]
+```
+
+
+
+Saving the filtered object
+```{r}
+saveRDS(str1205, file = "D:/Thesis/Analysis/Seurat5.2.1/str1205JustFiltered.rds")
+
+
+#save(your_object, file = "filtered_sc_data.RData")
+#load("filtered_sc_data.RData")
+
+```
+
+
+ Normalize the data
+Gene expression was normalized using a global-scaling normalization method (normalization method, ‘LogNormalize’; scale factor, 10,000)
+```{r}
+str1205 <- NormalizeData(str1205, normalization.method = "LogNormalize", scale.factor = 10000)
+```
+
+
+Identify highly variable features (genes)
+the 2,000 most variable genes were selected (selection method, ‘vst’) and scaled (mean = 0 and variance = 1 for each gene)
+What it does:
+It identifies genes whose expression varies the most across cells, relative to their average expression.
+
+These genes are the most informative for dimensionality reduction (like PCA), clustering, and visualization.
+
+🔹 What happens in the Seurat object:
+Seurat computes mean and variance for each gene.
+
+It calculates variance-to-mean relationships (e.g., via the “vst” method).
+
+It selects the top nfeatures (default 2000) based on this relationship.
+Internally, this updates:
+seurat_obj[["RNA"]]@meta.features
+→ Stores mean, variance, and dispersion values.
+
+VariableFeatures(seurat_obj)
+→ Returns a character vector of the selected HVGs.
+
+✅ These genes will be used by default in PCA, clustering, etc.
+```{r}
+str1205 <- FindVariableFeatures(str1205, selection.method = "vst", nfeatures = 2000)
+
+# View top HVGs
+head(VariableFeatures(str1205))
+```
+
+ Scale the data
+The data was scaled to a mean of 0 and variance of 1 for each gene
+A scaled expression matrix is added to the RNA assay in the "scale.data" slot:
+
+seurat_obj[["RNA"]]@scale.data
+
+This matrix contains the centered and scaled expression of (usually) only the HVGs — unless you specify features = all_genes.
+```{r}
+#str1205 <- ScaleData(str1205, features = rownames(str1205hvg))
+#I'm insisting on scaling based on variabled features
+
+str1205 <- ScaleData(str1205, features = VariableFeatures(str1205))
+
+#I wanted to check if it's scaling based on RNA
+DefaultAssay(str1205) #the answer is RNA
+
+```
+
+ Perform PCA
+The top 15 principal components were used for clustering (resolution of 0.5), using the ‘FindNeighbors’ and ‘FindClusters’ functions
+```{r}
+str1205 <- RunPCA(str1205, features = VariableFeatures(str1205))
+
+# Plot PCA
+DimPlot(str1205, reduction = "pca", group.by = "seurat_clusters", label = TRUE) #after running clustering
+VizDimLoadings(str1205, dims = 1:2, reduction = "pca")
+ElbowPlot(str1205, ndims = 50) #to see the elbow plot and decide how many PCs to use
+```
+
+
+```{r}
+# Find neighbors
+str1205 <- FindNeighbors(str1205, dims = 1:15)
+# Find clusters
+str1205 <- FindClusters(str1205, resolution = 0.5)
+```
+
+
+```{r}
+# Run UMAP
+str1205 <- RunUMAP(str1205, dims = 1:15)
+
+#saving the umap object
+#saveRDS(str1205, file = "D:/Thesis/Analysis/Seurat5.2.1/str1205umap.rds")
+
+DimPlot(str1205, reduction = "umap")
+```
+
+
+```{r}
+#Plot expression of marker genes per cluster:
+
+FeaturePlot(d801205_umap0.1, features = "TOP2A")  # example for neural progenitors
+VlnPlot(d801205_umap0.1, features = "TOP2A")  
+```
+
+
+```{r}
+FeaturePlot(str1205, features = c("GAD1", "GAD2", "TOP2A", "GSX2", "ASCL1", "HOPX", 
+                                     "AQP4", "GFAP", "SLC17A7", "SLC17A6", "SOX10", "OLIG2"))
+```
+
+```{r}
+DotPlot(str1205,  features = c("TOP2A", "GSX2", "ASCL1", "HOPX", "STMN2", "SYT1", "GAD1", "GAD2", "SLC17A7", "SLC17A6", "AQP4", "GFAP", "SOX10", "OLIG2"), group.by = "seurat_clusters")
+```
+
+```{r}
+DotPlot(str1205,  features = c("TOP2A", "GSX2", "ASCL1", "HOPX", "STMN2", "SYT1", "GAD1", "GAD2", "SLC17A7", "SLC17A6", "AQP4", "GFAP", "SOX10", "OLIG2", "RBFOX3"), group.by = "seurat_clusters")
+```
+
+
+
+```{r}
+# find markers for every cluster compared to all remaining cells, report only the positive
+# ones
+str1205Markers <- FindAllMarkers(str1205, only.pos = TRUE)
+
+#saving marker genes
+saveRDS(str1205Markers, file = "D:/Thesis/Analysis/Seurat5.2.1/str1205Markers.rds")
+
+# Filter markers based on avg_log2FC > 1
+d801205.markers0.2 %>%
+    group_by(cluster) %>%
+    dplyr::filter(avg_log2FC > 1)
+```
+
+```{r}
+#Top 10 marker genes of cluster 0
+d801205.markers %>%
+    group_by(cluster) %>%
+    top_n(n = 10)
+```
+
+
+
+
+
+#celltypist -> python
+#zellconvertor seruat to scipy which is a bioconductor package.
+
+Converting the file to analyse by celltypist
+
+zellconvertor
+
+```{r}
+library(zellkonverter)
+```
+
+
+```{r}
+sce <- as.SingleCellExperiment(d801205)
+
+```
+
+```{r}
+# Save as h5ad file
+out_path <- tempfile(pattern = ".h5ad")
+writeH5AD(sce, file = out_path)
+```
+
+```{r}
+library(basilisk)
+library(scRNAseq)
+
+#seger <- SegerstolpePancreasData()
+roundtrip <- basiliskRun(fun = function(sce) {
+    # Convert SCE to AnnData:
+    adata <- SCE2AnnData(d801205sc)
+```
+
+
+
+
+
+
+
+
+

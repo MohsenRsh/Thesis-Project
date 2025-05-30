@@ -1,0 +1,134 @@
+---
+title: "Bulk Data preprocessing"
+author: "Mohsen Rastgoo Shahrestani"
+date: "2025-05-22"
+output: html_document
+---
+
+# Pre-processing
+```{r}
+library(tidyverse)
+library(EDASeq)
+library(edgeR)
+```
+
+```{r}
+dlog <- log1p(d80)
+```
+
+
+```{r}
+boxplot(dlog, xlab = "sample", 
+        ylab="log1pexpression", ylim=c(0,20), las = 2, cex.axis = 0.6)
+
+```
+
+```{r}
+filter <- apply(d80, 1, function(x) sum(x >= 10))
+filter <- filter > 2
+filtered <- dlog[filter,]
+
+boxplot(filtered, xlab = "sample",
+        ylab = "log1pexpression", ylim = c(0,20), las = 2, cex.axis = 0.6)
+```
+
+```{r}
+plotRLE(dlog, outline = FALSE, las = 2,
+        ylab = "RLE", main = "RLE of raw counts with dlog data", col = A)
+```
+
+
+## GC
+Based on GC content a read can be more or less representated, so it is necessary to take into account the possible bias due to that: 
+```{r}
+ensid1205 <- as.character(rownames(d80))
+
+ensid1205 <- substr(ensid, 1, 15 )
+
+gc1205 <- getGeneLengthAndGCContent(ensid, "hg19",mode="org.db")
+
+head(gc)
+```
+
+```{r}
+flag <- !is.na(gc[,2])
+head(flag)
+
+
+d80.sel <- d80[flag,]
+head(d80.sel)
+
+
+gc1205 <- gc1205[flag,]
+head(gc1205)
+
+
+
+data <- d80.sel
+head(data)
+
+
+row.names(data) <- row.names(gc1205)
+```
+
+
+We are going to eliminate duplicates: 
+```{r}
+dup <- duplicated(row.names(data))
+table(duplicated(row.names(data)))
+```
+```{r}
+gc1205 <- gc1205[!dup,]
+data <- data[!dup,]
+d80.sel <- d80.sel[!dup,]
+```
+
+```{r}
+df <- newSeqExpressionSet(data,
+            phenoData=AnnotatedDataFrame(data.frame(
+                      conditions=factor(1:ncol(data)),
+                      row.names=colnames(data))),
+            featureData=AnnotatedDataFrame(data.frame(
+                      gc=gc1205[,2],l=gc1205[,1])))
+
+s <- EDASeq::biasPlot(df,"gc"
+                      ,ylim=c(0,10),
+                      log=TRUE)
+```
+
+For normalization we need to filter our data as mention before:
+```{r}
+filter_norm <- apply(data, 1, function(x) sum(x >= 10))
+filter_norm <- filter_norm > 2
+```
+
+
+```{r}
+df <- df[filter_norm,]
+d80.sel <- d80.sel[filter_norm,]
+```
+
+
+```{r}
+df1 <- counts(df)
+```
+### TMM method
+```{r}
+lbs <- calcNormFactors(df1, method = "TMM")
+tmm <- edgeR::cpm(df1, lib.size = lbs * colSums(df1))
+```
+
+
+```{r}
+boxplot(log2(tmm+1), outline = F, las = 2, ylab = "log(counts+1)", main = "Boxplot TMM",
+        xaxt = "n")
+```
+
+
+#Save normalized data
+
+```{r}
+write.table(tmm, file = "tmm.txt", sep = "\t", quote = F, col.names = NA)
+```
+
+

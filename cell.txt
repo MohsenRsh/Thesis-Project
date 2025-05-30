@@ -1,0 +1,15 @@
+cell ranger; for sinfgle cell.
+
+Now about the bulk-> it's ok to work with this type of aligned data that I have.
+
+
+
+the output of the library that make all the abundance quantification with together;
+it gives you abundance file for heatmap
+and counts for downstream analysis.
+
+
+
+
+this is a format of file that you may face:
+rdas file

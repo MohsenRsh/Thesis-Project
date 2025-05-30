@@ -1,0 +1,266 @@
+---
+title: "Seurat3.1.4"
+author: "Mohsen Rastgoo Shahrestani"
+date: "2025-05-26"
+output: html_document
+---
+
+```{r}
+library(renv)
+library(remotes)
+
+```
+
+```{r}
+setwd("D:/Thesis/Analysis/Seurat3.1.4/")
+
+#renv::init()
+renv::activate()
+```
+
+```{r}
+#remotes::install_version(package = 'Seurat', version = package_version('3.1.4'))
+#remotes::install_github("satijalab/seurat", ref = "v3.1.4")
+
+```
+Firstly speify your library path and then load required library or load manually from package list;
+```{r}
+.libPaths("D:/Thesis/Analysis/Seurat3.1.4/renv/library")
+```
+
+
+```{r}
+library(Seurat)
+#Since the older version is not compatible with new verison of Seuratobject, we don't load it manually.
+#library(SeuratoData)
+```
+
+
+```{r}
+#setting the directory of the file
+dir <-"D:/Thesis/Analysis/scData/1205_d80/"
+
+#We load our data
+data_1205 <- Read10X(data.dir = dir)
+```
+
+```{r}
+# Create Seurat object
+d801205 <- CreateSeuratObject(counts = data_1205, min.cells = 3) 
+#We don't filter it at the first time and we check the Counts, fetures and mithocondrial genes first by density plot and then we decide to remove based on a treshhold.
+#After checking them, I understand the treshhold that the authers proposed is ok.
+```
+
+```{r}
+d801205[[]]
+```
+
+```{r}
+# Check the percentage of mitochondrial genes
+mito_genes <- grep(pattern = "^MT-", x = rownames(d801205), value = TRUE)
+d801205[["percent.mito"]] <- PercentageFeatureSet(d801205, features = mito_genes)
+
+mito <- d801205[["percent.mito"]]
+```
+
+```{r}
+# Filter cells based on nFeature_RNA
+d801205 <- subset(d801205, subset = nFeature_RNA > 100 & nFeature_RNA < 10000)
+```
+
+```{r}
+# Filter cells based on mithocondrial genes
+d801205 <- subset(d801205, subset = percent.mito < 15) #A silly was made before. Instead of 15, I used 0.15.
+```
+
+```{r}
+#Filter out X and Y chromosomes
+# Get the list of genes on the X and Y chromosomes
+x_genes <- grep("^X", rownames(d801205), value = TRUE)
+y_genes <- grep("^Y", rownames(d801205), value = TRUE)
+# Filter out the genes on the X and Y chromosomes
+d801205<- d801205[!rownames(d801205) %in% c(x_genes, y_genes), ]
+```
+
+Our final filtered object is `obj1205_filtered`.
+```{r}
+#d801205_filtered <- d801205
+```
+
+```{r}
+# Normalize the data
+# Gene expression was normalized using a global-scaling normalization method (normalization method, ‘LogNormalize’; scale factor, 10,000)
+
+d801205 <- NormalizeData(d801205, normalization.method = "LogNormalize", scale.factor = 10000)
+```
+
+```{r}
+library(patchwork)
+```
+
+```{r}
+# Identify highly variable features (genes)
+# the 2,000 most variable genes were selected (selection method, ‘vst’) and scaled (mean = 0 and variance = 1 for each gene)
+d801205 <- FindVariableFeatures(d801205, selection.method = "vst", nfeatures = 2000)
+```
+
+```{r}
+# Scale the data
+# The data was scaled to a mean of 0 and variance of 1 for each gene
+d801205_scaled <- ScaleData(d801205, features = rownames(d801205))
+```
+
+```{r}
+# Perform PCA
+#The top 15 principal components were used for clustering (resolution of 0.5), using the ‘FindNeighbors’ and ‘FindClusters’ functions
+d801205_pca <- RunPCA(d801205_scaled, features = VariableFeatures(object = d801205_scaled))
+
+```
+
+```{r}
+# Find neighbors
+d801205_neighbors <- FindNeighbors(d801205_pca, dims = 1:15)
+# Find clusters (This is actually unsupervised clustering)
+d801205_clusters <- FindClusters(d801205_neighbors, resolution = 0.5)
+```
+
+
+
+```{r}
+library(ggplot2)
+```
+
+
+```{r}
+# Run UMAP
+d801205_umap <- RunUMAP(d801205_clusters, dims = 1:10)
+
+DimPlot(d801205_umap, reduction = "umap", pt.size = 0.7)
+```
+
+They didn’t blindly trust the unsupervised clusters — instead, they looked at marker gene expression in each cluster and grouped them into 6 biologically meaningful categories. This is key.
+What we can do to mirror the authors work;
+
+```{r}
+FeaturePlot(d801205_umap, features = c("GAD1", "GAD2", "TOP2A", "GSX2", "ASCL1", "HOPX", 
+                                     "AQP4", "GFAP", "SLC17A7", "SLC17A6", "SOX10", "OLIG2"))
+```
+
+```{r}
+DotPlot(d801205_umap,  features = c("TOP2A", "GSX2", "ASCL1", "HOPX", "STMN2", "SYT1", "GAD1", "GAD2", "SLC17A7", "SLC17A6", "AQP4", "GFAP", "SOX10", "OLIG2"), group.by = "seurat_clusters")
+```
+
+```{r}
+DotPlot(d801205_umap,  features = c("TOP2A", "GSX2", "ASCL1", "HOPX", "STMN2", "SYT1", "GAD1", "GAD2", "SLC17A7", "SLC17A6", "AQP4", "GFAP", "SOX10", "OLIG2", "RBFOX3"), group.by = "seurat_clusters")
+```
+Assign identities based on expression patterns
+```{r}
+# Manually map clusters to cell types
+cluster_ids <- c(
+  "0" = "Neuron",
+  "1" = "Neuron",
+  "3" = "Neuron",
+  "5" = "Neuron",
+  "4" = "Neuron",
+  "7" = "Neuron",
+  "9" = "Neuron",
+  "13" = "Neuron",
+  "2" = "Progenitor",
+  "6" = "Progenitor",
+  "8" = "Astrocytes",
+  "12" = "Oligodendrocyte"
+)
+```
+
+```{r}
+d801205_subset <- RenameIdents(d801205_clusters, cluster_ids)
+```
+
+```{r}
+# Update the metadata with the new identities
+d801205_subset$cell_type <- Idents(d801205_subset)
+```
+
+```{r}
+d801205_subset[[]]
+```
+
+Just keeping the cells with known cell type;
+```{r}
+cell_types_to_keep <- c("Neuron", "Progenitor", "Astrocytes", "Oligodendrocyte")
+subset_obj <- subset(d801205_subset, subset = cell_type %in% cell_types_to_keep)
+```
+
+Saving it for further analysis;
+```{r}
+saveRDS(subset_obj, file = "filtered_celltypes.rds")
+```
+
+
+
+```{r}
+d801205_umap$cell_type <- Idents(d801205_clusters)
+```
+
+```{r}
+# Visualize the updated UMAP with cell type identities
+DimPlot(d801205_umap, reduction = "umap", group.by = "cell_type", label = TRUE, pt.size = 0.8) +
+  labs(title = "UMAP of Clusters with Cell Type Identities")
+```
+
+
+```{r}
+# find markers for every cluster compared to all remaining cells, report only the positive
+# ones
+d801205.markers <- FindAllMarkers(d801205_umap, only.pos = TRUE)
+```
+
+
+```{r}
+library(dplyr)
+
+top100_per_cluster0.2 <- d801205.markers0.2 %>%
+  group_by(cluster) %>%
+  top_n(n = 100, wt = avg_log2FC) %>%
+  arrange(cluster, desc(avg_log2FC))
+```
+
+```{r}
+write.csv(top100_per_cluster0.2, file = "D:/Thesis/Analysis/top100_markers_per_cluster0.2v3.1.4.csv", row.names = FALSE)
+
+
+```
+
+```{r}
+FeaturePlot(d801205_umap0.2, features = "NEUROD2")  # example for neural progenitors
+VlnPlot(d801205_umap0.2, features = "NEUROD2") 
+```
+
+
+
+CLUSTER 7 -> PROLIFERATING CELLS
+CLUSTER 8 -> ASTROCYTES
+CLUSTER 4 -> GABAERGIC NEURONS
+CLUSTER 2 -> PROGENITOR CELLS
+CLUSTER 3 -> GLUTAMERGIC NEURONS
+CLUSTER 12 -> OLIGODENDROCYTES
+
+0 ->
+1 ->
+5 ->
+6 ->
+9 ->
+10 ->
+11 ->
+13 ->
+
+Now, based on what I did yesterday which was based on canonical markers, I keep those clusters which I could assign a
+cell type and I would discard others. And then I would rerun the UMAP to see if they are grouped together again or not.
+
+Before doing it, I go with the AddModuleScore function to assign the cell types based on the markers I have.
+
+```{r}
+# Define marker genes for each cell type
+
+```
+
